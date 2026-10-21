@@ -1,4 +1,4 @@
-const VERSION = 'inotes-v1.1.0';
+const VERSION = 'inotes-v1.2.0';
 const CACHE_NAME = 'inotes-' + VERSION;
 const APP_ASSETS = [
   './',
@@ -6,13 +6,13 @@ const APP_ASSETS = [
   './styles.css',
   './app.js',
   './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/icon-maskable-192.png',
-  './icons/icon-maskable-512.png',
-  './icons/apple-touch-icon.png',
-  './icons/favicon-48.png',
-  './icons/favicon.ico'
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-192.png',
+  './icon-maskable-512.png',
+  './apple-touch-icon.png',
+  './favicon-48.png',
+  './favicon.ico'
 ];
 
 self.addEventListener('install', event => {
