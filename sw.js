@@ -1,4 +1,4 @@
-const VERSION = 'inotes-v1.2.0';
+const VERSION = 'inotes-v1.3.0';
 const CACHE_NAME = 'inotes-' + VERSION;
 const APP_ASSETS = [
   './',
