@@ -28,7 +28,6 @@
   --radius-sm:12px;
   --speed:.28s;
   --ease:cubic-bezier(.32,.72,.24,1);
-  --rec:#ff5252;
 }
 [data-theme="light"]{
   --bg:#eef1f8;
@@ -369,17 +368,6 @@ img{display:block;max-width:100%}
 .tool-btn.wide .icon{width:17px;height:17px}
 .tool-btn.sm{width:40px;height:38px;background:var(--surface-2)}
 .tool-btn.ok{width:auto;padding:0 12px;color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,var(--surface-2))}
-.rec-timer{
-  flex:none;display:inline-flex;align-items:center;gap:6px;
-  font-variant-numeric:tabular-nums;font-weight:800;font-size:13px;
-  color:var(--rec);padding-inline:8px;
-}
-.rec-timer::before{
-  content:"";width:10px;height:10px;border-radius:50%;
-  background:var(--rec);
-  animation:recPulse 1s ease-in-out infinite;
-}
-@keyframes recPulse{0%,100%{opacity:.35;transform:scale(.8)}50%{opacity:1;transform:scale(1.15)}}
 
 /* editor body */
 .ed-body-wrap{
@@ -426,32 +414,6 @@ img{display:block;max-width:100%}
 @media (hover:none){
   .att .att-x{opacity:.92;pointer-events:auto}
 }
-.att-voice{
-  position:relative;display:inline-flex;align-items:center;gap:9px;
-  min-width:210px;padding:9px 13px;margin:6px 2px;
-  border-radius:14px;background:var(--surface-2);
-  border:1px solid var(--line-2);
-  cursor:pointer;user-select:none;
-  box-shadow:var(--shadow-1);
-}
-.att-voice .att-ic{
-  width:36px;height:36px;border-radius:11px;flex:none;
-  display:grid;place-items:center;
-  background:var(--accent-soft-2);color:var(--accent);
-}
-.att-voice.playing .att-ic{background:var(--accent-grad);color:#fff}
-.att-voice .att-ic .icon{width:19px;height:19px}
-.att-voice .att-meta{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
-.att-voice .att-t{font-size:13px;font-weight:800;color:var(--text);white-space:nowrap}
-.att-voice .att-bar{
-  height:4px;border-radius:99px;background:var(--line-2);overflow:hidden;
-}
-.att-voice .att-fill{
-  display:block;height:100%;width:0%;
-  background:var(--accent);border-radius:99px;
-  transition:width .18s linear;
-}
-.att-voice .att-dur{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums}
 
 /* draw area */
 .draw-area{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;margin-top:10px}

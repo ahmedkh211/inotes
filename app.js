@@ -4,21 +4,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmtTime = s => {
-  if (!isFinite(s) || s < 0) s = 0;
-  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-  return m + ':' + String(sec).padStart(2, '0');
-};
-const fmtBytes = b => {
-  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
-  if (!b || b < 1) return '0 ك.ب';
-  if (b < KB * 10) return (b / KB).toFixed(1) + ' ك.ب';
-  if (b < MB) return Math.round(b / KB) + ' ك.ب';
-  if (b < GB) return (b / MB).toFixed(1) + ' م.ب';
-  return (b / GB).toFixed(2) + ' ج.ب';
-};
 const uid = () => (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const debounce = (fn, ms) => {
   let t = null;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
@@ -95,9 +81,7 @@ const state = {
   editingId: null,
   pendingAtts: new Map(),
   saveTimer: null,
-  rec: { on: false, recorder: null, chunks: [], startedAt: 0, timerInt: null, stream: null },
-  draw: { on: false, color: '#222831', size: 5, erase: false, strokes: [] },
-  voice: { chip: null, url: null }
+  draw: { on: false, color: '#222831', size: 5, erase: false, strokes: [] }
 };
 
 const PKEY = 'inotes-prefs';
@@ -226,6 +210,7 @@ function cleanBodyHtml(html) {
   d.innerHTML = String(html || '');
   $$('.att-draw', d).forEach(im => { if (!im.closest('.att')) im.remove(); });
   $$('.att-x', d).forEach(x => x.remove());
+  $$('.att', d).forEach(h => { if (h.dataset.kind === 'audio') h.remove(); });
   $$('.att', d).forEach(h => h.removeAttribute('data-hydrated'));
   return d.innerHTML;
 }
@@ -245,13 +230,7 @@ function attPlaceholder(att) {
   if (att.kind === 'draw') {
     return `<span class="att" contenteditable="false" data-att="${esc(att.id)}" data-kind="draw"><img class="att-draw" alt="رسمة">${ATT_X}</span>`;
   }
-  const dur = att.dur ? fmtTime(att.dur) : '0:00';
-  return `<span class="att" contenteditable="false" data-att="${esc(att.id)}" data-kind="audio">` +
-    `<span class="att-voice" role="button" tabindex="-1">` +
-    `<span class="att-ic"><svg class="icon"><use href="#i-play"/></svg></span>` +
-    `<span class="att-meta"><span class="att-t">🎙 تسجيل صوتي</span>` +
-    `<span class="att-bar"><span class="att-fill"></span></span></span>` +
-    `<span class="att-dur">${dur}</span></span>${ATT_X}</span>`;
+  return '';
 }
 
 /* ================= Dashboard render ================= */
@@ -292,8 +271,7 @@ function renderGrid() {
     let excerpt = txt.slice(0, 140);
     const badges = [];
     if ((n.atts || []).some(a => a.kind === 'draw')) badges.push('<span class="card-badge"><svg class="icon"><use href="#i-brush"/></svg></span>');
-    if ((n.atts || []).some(a => a.kind === 'audio')) badges.push('<span class="card-badge"><svg class="icon"><use href="#i-mic"/></svg></span>');
-    if (!excerpt) excerpt = (badges.length ? '📐 🎙 محتوى وسائط' : 'نوتة فارغة');
+    if (!excerpt) excerpt = (badges.length ? '📐 محتوى وسائط' : 'نوتة فارغة');
     li.innerHTML = `
       <span class="card-top">
         <span class="card-title">${esc(n.title || 'بدون عنوان')}</span>
@@ -347,7 +325,7 @@ async function openNoteMenu(id) {
     if (a) downloadBlob(a.blob, safeName(n.title || 'رسمة') + '.png');
   }
   else if (choice === 'del') {
-    const ok = await confirmDialog({ title: 'حذف النوتة؟', message: `«${n.title || 'بدون عنوان'}» ستُحذف نهائياً مع كل محتوياتها (الصوت والرسم).`, okText: 'حذف نهائي' });
+    const ok = await confirmDialog({ title: 'حذف النوتة؟', message: `«${n.title || 'بدون عنوان'}» ستُحذف نهائياً مع كل محتوياتها (الرسم).`, okText: 'حذف نهائي' });
     if (!ok) return;
     await dbQuotaSafePut('notes', n).catch(() => {});
     await dbDelete('notes', n.id);
@@ -432,14 +410,12 @@ function closeEditor() {
     dbDelete('notes', n.id).catch(() => {});
     renderGrid();
   }
-  stopRecording(false);
   state.editingId = null;
   edSheet.classList.remove('open');
   edBackdrop.classList.remove('open');
   edSheet.setAttribute('aria-hidden', 'true');
   edOpen = false;
   document.body.style.overflow = '';
-  if (state.voice.url) { URL.revokeObjectURL(state.voice.url); state.voice.url = null; }
   renderGrid();
 }
 function isEmptyNote(n) {
@@ -582,72 +558,7 @@ function renderEmojiModal() {
   $('#modalBackdrop').onclick = () => closeModal();
 }
 
-/* ================= Voice notes ================= */
-const micBtn = $('#micBtn'), micLabel = $('#micLabel'), recTimer = $('#recTimer');
-const voiceAudio = $('#voiceAudio');
-async function startRecording() {
-  if (state.rec.on) return;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    state.rec.stream = stream;
-    state.rec.chunks = [];
-    let mime = '';
-    try {
-      mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
-    } catch (e) { /* */ }
-    const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
-    state.rec.recorder = rec;
-    state.rec.startedAt = Date.now();
-    rec.ondataavailable = e => { if (e.data && e.data.size) state.rec.chunks.push(e.data); };
-    rec.onstop = () => {
-      clearInterval(state.rec.timerInt);
-      stream.getTracks().forEach(t => t.stop());
-      state.rec.on = false;
-      state.rec.recorder = null;
-      recTimer.classList.add('hidden');
-      micBtn.classList.remove('on');
-      micLabel.textContent = 'صوتي';
-      if (!state.rec.chunks.length) {
-        state.rec.chunks = [];
-        toast('التسجيل كان فارغاً — جرّب تاني', 'error');
-        return;
-      }
-      const dur = (Date.now() - state.rec.startedAt) / 1000;
-      const type = state.rec.chunks[0].type || 'audio/webm';
-      const kindExt = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
-      const blob = new Blob(state.rec.chunks, { type });
-      state.rec.chunks = [];
-      insertVoiceAttachment(blob, dur, kindExt);
-    };
-    rec.start(400);
-    state.rec.on = true;
-    micBtn.classList.add('on');
-    micLabel.textContent = 'إيقاف';
-    recTimer.classList.remove('hidden');
-    recTimer.textContent = '0:00';
-    state.rec.timerInt = setInterval(() => {
-      recTimer.textContent = fmtTime((Date.now() - state.rec.startedAt) / 1000);
-    }, 500);
-    toast('بدأ التسجيل… اضغط «إيقاف» لما تخلص 🎙', 'info', 2200);
-  } catch (e) {
-    toast('تعذر الوصول للميكروفون — راجع صلاحيات المتصفح', 'error', 3600);
-  }
-}
-function stopRecording(withToast = true) {
-  if (state.rec.on && state.rec.recorder && state.rec.recorder.state !== 'inactive') {
-    state.rec.recorder.stop();
-    if (withToast) toast('تم إيقاف التسجيل ✓', 'success', 1600);
-  } else if (state.rec.recorder) {
-    state.rec.recorder.stop();
-  }
-}
-micBtn.addEventListener('click', () => state.rec.on ? stopRecording() : startRecording());
-function insertVoiceAttachment(blob, dur, kindExt) {
-  const att = { id: uid(), kind: 'audio', blob, dur: Math.round(dur * 10) / 10, ext: kindExt };
-  state.pendingAtts.set(att.id, att);
-  placeAtCursor(attPlaceholder(att));
-  scheduleSave();
-}
+/* ================= Cursor placement ================= */
 function placeAtCursor(html) {
   edBody.focus();
   const sel = window.getSelection();
@@ -669,74 +580,16 @@ function placeAtCursor(html) {
   applyEditorAttr();
 }
 
-/* voice playback */
-voiceAudio.addEventListener('timeupdate', () => {
-  const chip = state.voice.chip;
-  if (!chip) return;
-  const d = voiceAudio.duration;
-  const c = voiceAudio.currentTime;
-  const pct = d && isFinite(d) ? clamp((c / d) * 100, 0, 100) : 0;
-  $('.att-fill', chip).style.width = pct + '%';
-  const durEl = $('.att-dur', chip);
-  if (durEl) durEl.textContent = fmtTime(c) + ' / ' + (d && isFinite(d) ? fmtTime(d) : '0:00');
-});
-voiceAudio.addEventListener('ended', () => {
-  const chip = state.voice.chip;
-  if (chip) {
-    chip.classList.remove('playing');
-    $('use', chip).setAttribute('href', '#i-play');
-    $('.att-fill', chip).style.width = '0%';
-    state.voice.chip = null;
-  }
-  if (state.voice.url) { URL.revokeObjectURL(state.voice.url); state.voice.url = null; }
-});
 edBody.addEventListener('click', e => {
   const xbtn = e.target.closest('.att-x');
-  if (xbtn) {
-    e.preventDefault();
-    e.stopPropagation();
-    const holder = xbtn.closest('.att');
-    const kind = holder ? holder.dataset.kind : 'draw';
-    const chipWas = holder ? holder.querySelector('.att-voice') : null;
-    if (chipWas && state.voice.chip === chipWas) {
-      document.getElementById('voiceAudio').pause();
-      state.voice.chip = null;
-      if (state.voice.url) { URL.revokeObjectURL(state.voice.url); state.voice.url = null; }
-    }
-    holder.remove();
-    scheduleSave();
-    toast(kind === 'audio' ? 'تمت إزالة التسجيل 🎙' : 'تم إزالة الصورة 🖌', 'info', 1600);
-    return;
-  }
-  const chip = e.target.closest('.att-voice');
-  if (!chip) return;
+  if (!xbtn) return;
   e.preventDefault();
-  const holder = chip.closest('.att');
-  const attId = holder && holder.dataset.att;
-  const n = currentNote();
-  const att = (n ? n.atts : []).find(a => a.id === attId) || state.pendingAtts.get(attId);
-  if (!att || !att.blob) { toast('الصوت غير متوفر بعد — احفظ النوتة أولاً', 'error'); return; }
-  if (state.voice.chip === chip && !voiceAudio.paused) {
-    voiceAudio.pause();
-    chip.classList.remove('playing');
-    $('use', chip).setAttribute('href', '#i-play');
-    return;
-  }
-  if (state.voice.chip && state.voice.chip !== chip) {
-    state.voice.chip.classList.remove('playing');
-    $('use', state.voice.chip).setAttribute('href', '#i-play');
-  }
-  if (state.voice.url) URL.revokeObjectURL(state.voice.url);
-  state.voice.url = URL.createObjectURL(att.blob);
-  voiceAudio.src = state.voice.url;
-  state.voice.chip = chip;
-  voiceAudio.play().then(() => {
-    chip.classList.add('playing');
-    $('use', chip).setAttribute('href', '#i-pause');
-  }).catch(() => {
-    toast('تعذر تشغيل التسجيل — الصيغة غير مدعومة', 'error');
-    state.voice.chip = null;
-  });
+  e.stopPropagation();
+  const holder = xbtn.closest('.att');
+  if (!holder) return;
+  holder.remove();
+  scheduleSave();
+  toast('تم إزالة الصورة 🖌', 'info', 1600);
 });
 
 /* ================= Draw mode ================= */
@@ -758,7 +611,6 @@ function enterDraw() {
   $('#drawBtn').classList.add('on');
   drawArea.classList.remove('hidden');
   edBodyWrap.classList.add('hidden');
-  stopRecording(false);
   setTimeout(sizeCanvas, 40);
 }
 function exitDraw() {
@@ -888,7 +740,7 @@ function hydrateAtts(n) {
     const id = holder.dataset.att;
     const kind = holder.dataset.kind;
     const att = (n.atts || []).find(a => a.id === id);
-    if (!att) { holder.remove(); return; }
+    if (!att || kind === 'audio') { holder.remove(); return; }
     if (kind === 'draw') {
       const img = $('img', holder);
       if (!img) return;
@@ -957,7 +809,7 @@ $('#edMore').addEventListener('click', async () => {
   else if (choice === 'pdf') exportPDF(n);
   else if (choice === 'txt') exportTXT(n);
   else if (choice === 'del') {
-    const ok = await confirmDialog({ title: 'حذف النوتة؟', message: 'سيتم الحذف نهائياً مع الصوت والرسم داخلها.', okText: 'حذف نهائي' });
+    const ok = await confirmDialog({ title: 'حذف النوتة؟', message: 'سيتم الحذف نهائياً مع الرسم داخلها.', okText: 'حذف نهائي' });
     if (!ok) return;
     await dbDelete('notes', n.id).catch(() => {});
     state.editingId = null;
@@ -1002,10 +854,7 @@ function buildExportFragments(n, attsData) {
       img.style.cssText = 'display:block;max-width:min(340px,62%);border-radius:14px;margin:10px 0';
       holder.replaceWith(img);
     } else {
-      const chip = document.createElement('div');
-      chip.textContent = `🎙 تسجيل صوتي · ${fmtTime(att.dur || 0)}`;
-      chip.style.cssText = 'display:inline-block;background:rgba(120,150,255,.18);border-radius:12px;padding:8px 14px;margin:6px 0;font-size:14px;font-weight:700';
-      holder.replaceWith(chip);
+      holder.remove();
     }
   });
   body.querySelectorAll('ul').forEach(u => u.style.cssText = 'margin:6px 22px;list-style:disc');
@@ -1207,7 +1056,7 @@ function openSettings() {
         </div>
       </div>
       <div class="set-item" style="flex-direction:column;align-items:stretch;gap:8px">
-        <div class="info"><div class="t">النسخ الاحتياطي</div><div class="d">ملف JSON يشمل كل النوتات والصوت والرسم</div></div>
+        <div class="info"><div class="t">النسخ الاحتياطي</div><div class="d">ملف JSON يشمل كل النوتات والرسم</div></div>
         <div style="display:flex;gap:8px">
           <button class="btn sm ghost" id="backupBtn" type="button" style="flex:1"><svg class="icon sm"><use href="#i-download"/></svg> تصدير نسخة</button>
           <button class="btn sm ghost" id="restoreBtn" type="button" style="flex:1"><svg class="icon sm"><use href="#i-up"/></svg> استيراد نسخة</button>
@@ -1245,7 +1094,7 @@ function openSettings() {
   $('#backupBtn').onclick = exportBackup;
   $('#restoreBtn').onclick = () => $('#importFile').click();
   $('#wipeBtn').onclick = async () => {
-    const ok = await confirmDialog({ title: 'تمسح كل حاجة؟', message: 'هيتم حذف كل النوتات (الصوت والرسم عليه) والإعدادات نهائياً. لا يمكن الرجوع!', okText: 'حذف نهائي' });
+    const ok = await confirmDialog({ title: 'تمسح كل حاجة؟', message: 'هيتم حذف كل النوتات (والرسم عليها) والإعدادات نهائياً. لا يمكن الرجوع!', okText: 'حذف نهائي' });
     if (!ok) return;
     const ok2 = await confirmDialog({ title: 'تأكيد أخير', message: 'هيتم مسح كل بيانات iNotes نهائياً.', okText: 'امسح الكل' });
     if (!ok2) return;
@@ -1307,7 +1156,7 @@ $('#importFile').addEventListener('change', async e => {
         atts: []
       };
       for (const ra of (rn.atts || [])) {
-        if (ra.kind !== 'audio' && ra.kind !== 'draw') continue;
+        if (ra.kind !== 'draw') continue;
         if (!ra.data) continue;
         try {
           const blob = await (await fetch(ra.data)).blob();
@@ -1409,7 +1258,6 @@ document.addEventListener('keydown', e => {
   if (!edOpen) return;
   if (e.key === 'Escape' && !modalRoot.hidden) return; // modal handles itself
   if (e.key === 'Escape' && state.draw.on) { exitDraw(); e.preventDefault(); return; }
-  if (e.key === 'Escape' && state.rec.on) { stopRecording(); e.preventDefault(); return; }
   if (e.key === 'Escape') { e.preventDefault(); closeEditor(); }
 });
 
@@ -1424,7 +1272,7 @@ async function init() {
   try {
     let notes = await dbGetAll('notes');
     state.notes = (notes || []).filter(n => n && n.id).map(n => {
-      n.atts = (n.atts || []).filter(a => a && a.blob instanceof Blob);
+      n.atts = (n.atts || []).filter(a => a && a.blob instanceof Blob && a.kind !== 'audio');
       return n;
     }).sort((a, b) => (b.updated || 0) - (a.updated || 0));
   } catch (e) {
